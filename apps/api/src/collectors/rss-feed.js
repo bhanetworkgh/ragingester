@@ -173,20 +173,19 @@ function validateItem(item) {
   return null;
 }
 
-function ingestHeaders(cfg, workspaceId, payloadType, payloadSchema) {
+function ingestHeaders(cfg, payloadType, payloadSchema) {
   return {
     'content-type': 'application/json',
     'x-api-key': cfg.workspaceApiKey,
-    'x-workspace-id': workspaceId,
     'payload-type': payloadType,
     ...(payloadSchema ? { 'payload-schema': payloadSchema } : {})
   };
 }
 
-async function ingestBookDocument({ cfg, workspaceId, item }) {
+async function ingestBookDocument({ cfg, item }) {
   return fetchJson(`${cfg.bharagBaseUrl}/api/v1/ingest`, {
     method: 'POST',
-    headers: ingestHeaders(cfg, workspaceId, 'rag'),
+    headers: ingestHeaders(cfg, 'rag'),
     body: JSON.stringify({
       title: item.title,
       content: item.content.trim(),
@@ -195,11 +194,11 @@ async function ingestBookDocument({ cfg, workspaceId, item }) {
   });
 }
 
-async function ingestLedgerEvent({ cfg, workspaceId, sourceInput, item }) {
+async function ingestLedgerEvent({ cfg, sourceInput, item }) {
   const sourceUrl = item.link || sourceInput;
   return fetchJson(`${cfg.bharagBaseUrl}/api/v1/ingest`, {
     method: 'POST',
-    headers: ingestHeaders(cfg, workspaceId, 'ledger', cfg.ledgerSchema),
+    headers: ingestHeaders(cfg, 'ledger', cfg.ledgerSchema),
     body: JSON.stringify({
       occurred_at: item.pubDate,
       entity_type: 'document',
@@ -220,9 +219,9 @@ async function ingestLedgerEvent({ cfg, workspaceId, sourceInput, item }) {
   });
 }
 
-async function ingestRssItem({ cfg, workspaceId, sourceInput, item }) {
-  await ingestBookDocument({ cfg, workspaceId, item });
-  await ingestLedgerEvent({ cfg, workspaceId, sourceInput, item });
+async function ingestRssItem({ cfg, sourceInput, item }) {
+  await ingestBookDocument({ cfg, item });
+  await ingestLedgerEvent({ cfg, sourceInput, item });
 }
 
 export async function prewarmRssFeed({
@@ -309,7 +308,7 @@ export const rssFeedCollector = {
       }
 
       try {
-        await ingestBookDocument({ cfg, workspaceId: cfg.workspaceId, item });
+        await ingestBookDocument({ cfg, item });
         bookIngestedCount += 1;
       } catch (error) {
         failedItems.push({
@@ -325,7 +324,6 @@ export const rssFeedCollector = {
       try {
         await ingestLedgerEvent({
           cfg,
-          workspaceId: cfg.workspaceId,
           sourceInput: source_input,
           item
         });

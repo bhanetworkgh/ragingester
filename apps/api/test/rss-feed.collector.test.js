@@ -180,6 +180,7 @@ test('rssFeedCollector dual-writes clean Book prose and strict RSS Ledger metada
     const bookBody = JSON.parse(bookCall.options.body);
     assert.equal(bookCall.options.headers['payload-type'], 'rag');
     assert.equal(bookCall.options.headers['x-api-key'], 'rss-workspace-key');
+    assert.equal(bookCall.options.headers['x-workspace-id'], undefined);
     assert.deepEqual(bookBody, {
       title: 'new post',
       content: 'new content',
@@ -190,6 +191,7 @@ test('rssFeedCollector dual-writes clean Book prose and strict RSS Ledger metada
     const ledgerBody = JSON.parse(ledgerCall.options.body);
     assert.equal(ledgerCall.options.headers['payload-type'], 'ledger');
     assert.equal(ledgerCall.options.headers['payload-schema'], 'ingest.rss');
+    assert.equal(ledgerCall.options.headers['x-workspace-id'], undefined);
     assert.deepEqual(ledgerBody, {
       occurred_at: '2026-04-22T09:00:00.000Z',
       entity_type: 'document',
