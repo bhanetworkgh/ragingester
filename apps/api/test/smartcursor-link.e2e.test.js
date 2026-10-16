@@ -8,6 +8,8 @@ import { resetRepositoryForTests, setRepositoryForTests } from '../src/repositor
 
 const SMARTCURSOR_BASE_URL = 'https://smartcursorbrowser.onrender.com/app/';
 const SMARTCURSOR_API_KEY = 'testing';
+const runEnabled = ['1', 'true', 'yes', 'on'].includes(String(process.env.RUN_SMARTCURSOR_E2E || '').toLowerCase());
+const skipReason = runEnabled ? false : 'RUN_SMARTCURSOR_E2E is not enabled';
 
 function jsonResponse(res, statusCode, payload) {
   res.writeHead(statusCode, { 'content-type': 'application/json' });
@@ -123,7 +125,7 @@ function authHeaders(userId) {
   };
 }
 
-test('smartcursor_link true e2e across API + SmartCursor Browser + Bharag mock', { timeout: 240000 }, async () => {
+test('smartcursor_link true e2e across API + SmartCursor Browser + Bharag mock', { timeout: 240000, skip: skipReason }, async () => {
   setRepositoryForTests(createMemoryRepository());
   const originalConfig = {
     bharagSmartcursorWorkspaceId: config.bharagSmartcursorWorkspaceId,
@@ -172,7 +174,7 @@ test('smartcursor_link true e2e across API + SmartCursor Browser + Bharag mock',
 
     assert.equal(runRes.status, 202);
     const run = await runRes.json();
-    assert.equal(run.status, 'success');
+    assert.equal(run.status, 'success', run.error || 'run failed without error text');
     assert.equal(run.trigger_mode, 'manual');
 
     const cardAfterRunRes = await fetch(`${appServer.baseUrl}/cards/${card.id}`, {
