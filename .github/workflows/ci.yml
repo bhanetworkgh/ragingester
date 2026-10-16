@@ -95,4 +95,15 @@ jobs:
     steps:
       - name: Trigger Render Deploy
         if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
-        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /tmp/render-deploy-body -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL")"
+          cat /tmp/render-deploy-body || true
+          echo
+          # 409 means Render already has a deploy in flight (auto-deploy or a prior hook).
+          if [ "$status" = "200" ] || [ "$status" = "201" ] || [ "$status" = "202" ] || [ "$status" = "409" ]; then
+            echo "Render deploy hook accepted ($status)"
+            exit 0
+          fi
+          echo "Render deploy hook failed ($status)"
+          exit 1
