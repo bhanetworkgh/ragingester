@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto';
 import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { rssFeedCollector } from '../src/collectors/rss-feed.js';
 import { config } from '../src/config.js';
+
+function fingerprintSecret(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex').slice(0, 12)}:len=${value.length}`;
+}
 
 const originalRssConfig = {
   bharagRssWorkspaceId: config.bharagRssWorkspaceId,
@@ -192,6 +197,12 @@ test('rssFeedCollector dual-writes clean Book prose and strict RSS Ledger metada
     assert.equal(ledgerCall.options.headers['payload-type'], 'ledger');
     assert.equal(ledgerCall.options.headers['payload-schema'], 'ingest.rss');
     assert.equal(ledgerCall.options.headers['x-workspace-id'], undefined);
+
+    const completionLog = result.logs.find((entry) => entry.message.startsWith('rss ingestion completed'));
+    assert.equal(completionLog.data.workspaceId, 'ws-rss');
+    assert.equal(completionLog.data.xWorkspaceIdHeader, null);
+    assert.equal(completionLog.data.workspaceKeyFingerprint, fingerprintSecret('rss-workspace-key'));
+    assert.equal(JSON.stringify(result.logs).includes('rss-workspace-key'), false);
     assert.deepEqual(ledgerBody, {
       occurred_at: '2026-04-22T09:00:00.000Z',
       entity_type: 'document',
@@ -382,6 +393,9 @@ test('rssFeedCollector stops at a Ledger failure and preserves a same-timestamp 
     assert.deepEqual(result.card_updates.params.rss_cursor_item_guids, ['first-guid']);
     assert.equal(calls.filter((call) => call.url.endsWith('/api/v1/ingest')).length, 4);
     assert.equal(result.logs.at(-1).data.lane, 'ledger');
+    assert.equal(result.logs.at(-1).data.bharagAuth.workspaceId, 'ws-rss');
+    assert.equal(result.logs.at(-1).data.bharagAuth.xWorkspaceIdHeader, null);
+    assert.equal(result.logs.at(-1).data.bharagAuth.workspaceKeyFingerprint, fingerprintSecret('rss-workspace-key'));
   } finally {
     global.fetch = originalFetch;
   }
@@ -420,6 +434,12 @@ test('rssFeedCollector does not call Ledger when the Book write fails', async ()
     throw new Error(`Unexpected fetch call: ${url}`);
   };
 
+  const authLogs = [];
+  const originalInfo = console.info;
+  console.info = (...args) => {
+    if (args[0] === 'rss.bharag_ingest_auth') authLogs.push(args[1]);
+  };
+
   try {
     await assert.rejects(
       rssFeedCollector.collect({
@@ -430,10 +450,23 @@ test('rssFeedCollector does not call Ledger when the Book write fails', async ()
           bharag_base_url: 'https://bharag.example'
         }
       }),
-      /failed to ingest RSS items:/
+      (error) => {
+        assert.match(error.message, /failed to ingest RSS items:/);
+        assert.match(error.message, /workspaceId=ws-rss/);
+        assert.match(error.message, /xWorkspaceIdHeader=omitted/);
+        assert.match(error.message, new RegExp(fingerprintSecret('rss-workspace-key')));
+        assert.equal(error.message.includes('rss-workspace-key'), false);
+        return true;
+      }
     );
     assert.equal(ingestCalls, 1);
+    assert.equal(authLogs.length, 1);
+    assert.equal(authLogs[0].workspaceId, 'ws-rss');
+    assert.equal(authLogs[0].xWorkspaceIdHeader, null);
+    assert.equal(authLogs[0].workspaceKeyFingerprint, fingerprintSecret('rss-workspace-key'));
+    assert.equal(JSON.stringify(authLogs).includes('rss-workspace-key'), false);
   } finally {
+    console.info = originalInfo;
     global.fetch = originalFetch;
   }
 });

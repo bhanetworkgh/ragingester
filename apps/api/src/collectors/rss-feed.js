@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 
 const GENIE_RSS_READY_WAIT_MS = 60 * 1000;
@@ -173,6 +174,24 @@ function validateItem(item) {
   return null;
 }
 
+function fingerprintSecret(value) {
+  if (typeof value !== 'string' || !value) return null;
+  return `sha256:${createHash('sha256').update(value).digest('hex').slice(0, 12)}:len=${value.length}`;
+}
+
+function describeBharagIngestAuth(cfg) {
+  return {
+    workspaceId: cfg.workspaceId || null,
+    xWorkspaceIdHeader: null,
+    workspaceKeyFingerprint: fingerprintSecret(cfg.workspaceApiKey)
+  };
+}
+
+function formatBharagIngestAuth(auth) {
+  const header = auth.xWorkspaceIdHeader == null ? 'omitted' : auth.xWorkspaceIdHeader;
+  return `workspaceId=${auth.workspaceId || 'none'} xWorkspaceIdHeader=${header} key=${auth.workspaceKeyFingerprint || 'none'}`;
+}
+
 function ingestHeaders(cfg, payloadType, payloadSchema) {
   return {
     'content-type': 'application/json',
@@ -262,6 +281,12 @@ export const rssFeedCollector = {
     const cfg = resolveIntegrationConfig(params);
     const previousRun = cfg.cursor;
     assertBharagRssConfig(cfg);
+    const bharagAuth = describeBharagIngestAuth(cfg);
+    // eslint-disable-next-line no-console
+    console.info('rss.bharag_ingest_auth', {
+      feed: source_input,
+      ...bharagAuth
+    });
 
     await prewarmRssFeed({ params });
 
@@ -316,7 +341,8 @@ export const rssFeedCollector = {
           link: item.link,
           guid: item.guid,
           lane: 'book',
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
+          bharagAuth
         });
         break;
       }
@@ -335,7 +361,8 @@ export const rssFeedCollector = {
           link: item.link,
           guid: item.guid,
           lane: 'ledger',
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
+          bharagAuth
         });
         break;
       }
@@ -349,7 +376,7 @@ export const rssFeedCollector = {
     }
 
     if (failedItems.length > 0 && ingestedItems.length === 0 && newItems.length > 0) {
-      throw new Error(`failed to ingest RSS items: ${failedItems[0].error}`);
+      throw new Error(`failed to ingest RSS items: ${failedItems[0].error} (${formatBharagIngestAuth(bharagAuth)})`);
     }
 
     return {
@@ -401,7 +428,8 @@ export const rssFeedCollector = {
             bookIngested: bookIngestedCount,
             ledgerIngested: ledgerIngestedCount,
             workspaceId: cfg.workspaceId,
-            ledgerSchema: cfg.ledgerSchema
+            ledgerSchema: cfg.ledgerSchema,
+            ...bharagAuth
           }
         },
         ...failedItems.map((item) => ({
