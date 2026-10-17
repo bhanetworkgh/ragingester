@@ -8,6 +8,22 @@ function fingerprintSecret(value) {
   return `sha256:${createHash('sha256').update(value).digest('hex').slice(0, 12)}:len=${value.length}`;
 }
 
+function headerValue(headers, name) {
+  if (!headers) return undefined;
+  const match = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
+  return match == null ? undefined : headers[match];
+}
+
+function jsonResponse(body, ok = true, status = 200) {
+  return {
+    ok,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  };
+}
+
 const originalRssConfig = {
   bharagRssWorkspaceId: config.bharagRssWorkspaceId,
   bharagRssWorkspaceApiKey: config.bharagRssWorkspaceApiKey,
@@ -180,6 +196,10 @@ test('rssFeedCollector dual-writes clean Book prose and strict RSS Ledger metada
 
     const ingestCalls = calls.filter((call) => call.url.endsWith('/api/v1/ingest'));
     assert.equal(ingestCalls.length, 2, 'one Book and one Ledger write expected');
+    for (const ingestCall of ingestCalls) {
+      assert.equal(headerValue(ingestCall.options.headers, 'x-workspace-id'), undefined);
+      assert.equal(headerValue(ingestCall.options.headers, 'x-api-key'), 'rss-workspace-key');
+    }
 
     const bookCall = ingestCalls[0];
     const bookBody = JSON.parse(bookCall.options.body);
@@ -220,6 +240,91 @@ test('rssFeedCollector dual-writes clean Book prose and strict RSS Ledger metada
         item_pub_date: '2026-04-22T09:00:00.000Z'
       }
     });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('rssFeedCollector omits X-Workspace-ID and routes Book/Ledger by the workspace-scoped key', async () => {
+  const calls = [];
+  const routedWorkspaces = [];
+  const originalFetch = global.fetch;
+  const scopedKey = 'rss-workspace-key';
+  const boundWorkspaceId = 'ws-rss-bound-to-key';
+
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+
+    if (url.endsWith('/health')) return jsonResponse({ status: 'ok' });
+    if (url.endsWith('/api/rss/fetch')) {
+      return jsonResponse({
+        feed: {
+          items: [{
+            title: 'scoped-key post',
+            guid: 'scoped-key-guid',
+            link: 'https://example.com/scoped',
+            content: 'enough article prose',
+            pubDate: '2026-04-22T09:00:00Z'
+          }]
+        }
+      });
+    }
+
+    if (url.endsWith('/api/v1/ingest')) {
+      const workspaceHeader = headerValue(options.headers, 'x-workspace-id');
+      const apiKey = headerValue(options.headers, 'x-api-key');
+      if (workspaceHeader != null && String(workspaceHeader).trim() !== '') {
+        return jsonResponse({
+          error: {
+            message: 'X-Workspace-ID does not match the workspace key. Either omit the header or use the workspace id/slug bound to the key.',
+            code: 'WORKSPACE_KEY_HEADER_MISMATCH'
+          }
+        }, false, 400);
+      }
+      if (apiKey !== scopedKey) {
+        return jsonResponse({ error: { code: 'UNAUTHORIZED' } }, false, 401);
+      }
+      routedWorkspaces.push({
+        payloadType: headerValue(options.headers, 'payload-type'),
+        workspaceId: boundWorkspaceId
+      });
+      return jsonResponse({ success: true, workspace_id: boundWorkspaceId }, true, 201);
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  };
+
+  try {
+    const result = await rssFeedCollector.collect({
+      source_input: 'https://example.com/feed.xml',
+      params: {
+        bharag_rss_workspace_id: 'conflicting-card-workspace-id',
+        genie_rss_base_url: 'https://genie.example',
+        genie_rss_api_key: 'genie-key',
+        bharag_base_url: 'https://bharag.example'
+      }
+    });
+
+    assert.equal(result.metrics.ingested, 1);
+    assert.equal(result.metrics.book_ingested, 1);
+    assert.equal(result.metrics.ledger_ingested, 1);
+    assert.equal(result.card_updates.params.rss_workspace_id, 'conflicting-card-workspace-id');
+
+    const ingestCalls = calls.filter((call) => call.url.endsWith('/api/v1/ingest'));
+    assert.equal(ingestCalls.length, 2);
+    for (const ingestCall of ingestCalls) {
+      assert.equal(headerValue(ingestCall.options.headers, 'x-workspace-id'), undefined);
+      assert.equal(
+        Object.keys(ingestCall.options.headers).some((key) => key.toLowerCase() === 'x-workspace-id'),
+        false
+      );
+      assert.equal(headerValue(ingestCall.options.headers, 'x-api-key'), scopedKey);
+    }
+
+    assert.deepEqual(routedWorkspaces, [
+      { payloadType: 'rag', workspaceId: boundWorkspaceId },
+      { payloadType: 'ledger', workspaceId: boundWorkspaceId }
+    ]);
   } finally {
     global.fetch = originalFetch;
   }

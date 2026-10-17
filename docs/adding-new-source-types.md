@@ -55,6 +55,7 @@ Recommended conventions from `rss_feed`:
 - Throw clear errors for missing external keys/config.
 - Put human-useful details into `logs`.
 - Keep `card_updates.params` for successful cursor/checkpoint updates only.
+- On a workspace-scoped BHARAG key (`bha_ws_…`), send `x-api-key` only. Do not send `X-Workspace-ID`; BHARAG binds the workspace from the key, and a second header causes `WORKSPACE_KEY_HEADER_MISMATCH`.
 
 ## 4) Register the Collector
 
@@ -191,6 +192,7 @@ Minimum recommended tests:
 2. Run-path test via `executeRun`/routes (success and failure)
 3. Scheduler behavior test if scheduled path has custom behavior
 4. Cursor/checkpoint test: ensure state updates happen only on success
+5. If ingest uses a workspace-scoped BHARAG key: assert Book/Ledger requests omit `X-Workspace-ID` and still succeed when the mock routes by that key (sending the header should reproduce `WORKSPACE_KEY_HEADER_MISMATCH`)
 
 Reference tests:
 - `apps/api/test/rss-feed.collector.test.js`
@@ -217,5 +219,6 @@ Then smoke test in UI:
 - Added collector but forgot validation enum -> card create fails.
 - External keys missing in runtime env -> run failures.
 - Checkpoint/cursor updated on failed runs -> data loss/skip risk (guard with tests).
+- Sending `X-Workspace-ID` with a workspace-scoped BHARAG key (`bha_ws_…`) -> `WORKSPACE_KEY_HEADER_MISMATCH`. Authenticate with `x-api-key` only.
 - Route collisions when adding new card subroutes (define static routes before `/:id` routes).
 

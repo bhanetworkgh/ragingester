@@ -103,9 +103,12 @@ Non-RSS production collectors that ingest to legacy Bharag follow the same works
 3. `POST /api/v1/workspaces` if missing.
 4. Ensure an owner builder (find/create builder, add member).
 
-Auth: `x-api-key` + `x-workspace-id` on `POST /api/v1/ingest`.
+Auth on `POST /api/v1/ingest`:
 
-RSS is the exception: it uses a pre-provisioned BHARAG2 workspace and workspace API key. It never creates a workspace or owner at runtime.
+- Legacy / non-RSS collectors that use a master or org key send `x-api-key` plus `x-workspace-id`.
+- RSS uses a pre-provisioned BHARAG2 workspace and a **workspace-scoped** API key (`bha_ws_…`). Send `x-api-key` only. Do **not** send `X-Workspace-ID`: BHARAG binds the workspace from the key, and a second id produces `WORKSPACE_KEY_HEADER_MISMATCH`. `BHARAG_RSS_WORKSPACE_ID` is recorded on the card as `rss_workspace_id`; it is not an ingest header.
+
+RSS never creates a workspace or owner at runtime.
 
 ### Shared per-card integration overrides
 
@@ -231,6 +234,7 @@ sequenceDiagram
 
 Each RSS item is a required pair:
 
+- **Auth:** `x-api-key: BHARAG_RSS_WORKSPACE_API_KEY` on both writes. Omit `X-Workspace-ID`. The scoped key selects the RSS workspace; do not reintroduce a workspace-id header on this rail or on future workspace-keyed ingest lanes.
 - **Book:** `payload-type: rag`, with only `title`, article `content`, and the required `source_type: manual`. Run timestamps, tags, URLs, GUIDs, and other metadata are never embedded into retrievable prose.
 - **Ledger:** `payload-type: ledger` plus `payload-schema: ingest.rss`; `occurred_at` is the item publication date and `entity_id` is the stable RSS GUID. The payload follows [`bharag2/ingest-rss.schema.json`](./bharag2/ingest-rss.schema.json).
 
@@ -247,7 +251,7 @@ BHARAG_RSS_WORKSPACE_API_KEY=<workspace key>
 BHARAG_RSS_LEDGER_SCHEMA=ingest.rss
 ```
 
-Smoke the `rag` and `ledger` lanes against the provisioned workspace before deploy. After deployment, manually run one RSS card and verify article prose through Book retrieval plus a Ledger query for the same GUID and publication timestamp. Roll back by redeploying the prior application and configuration; RSS has no automatic legacy fallback.
+Smoke the `rag` and `ledger` lanes against the provisioned workspace **with the workspace key alone** (no `X-Workspace-ID`) before deploy. After deployment, manually run one RSS card and verify article prose through Book retrieval plus a Ledger query for the same GUID and publication timestamp. Roll back by redeploying the prior application and configuration; RSS has no automatic legacy fallback.
 
 ### Production feeds
 
@@ -477,8 +481,8 @@ Returns synthetic `normalized.resolved: true` with the identifier echoed. Intend
 | `GENIE_RSS_BASE_URL` | `https://genie-rss-5i00.onrender.com` | rss, youtube, linkedin |
 | `GENIE_RSS_API_KEY` | *(secret)* | Genie auth |
 | `BHARAG_BASE_URL` | `https://bharag.duckdns.org` | Bharag endpoint (BHARAG2 for RSS) |
-| `BHARAG_RSS_WORKSPACE_ID` | — | Pre-provisioned BHARAG2 RSS workspace |
-| `BHARAG_RSS_WORKSPACE_API_KEY` | *(secret)* | BHARAG2 RSS workspace auth |
+| `BHARAG_RSS_WORKSPACE_ID` | — | Recorded on the card as `rss_workspace_id`; not sent as `X-Workspace-ID` |
+| `BHARAG_RSS_WORKSPACE_API_KEY` | *(secret)* | Workspace-scoped BHARAG2 key that selects the RSS workspace |
 | `BHARAG_RSS_LEDGER_SCHEMA` | `ingest.rss` | BHARAG2 RSS Ledger corpus |
 | `BHARAG_YOUTUBE_WORKSPACE_ID` / `BHARAG_YOUTUBE_WORKSPACE_API_KEY` | — / *(secret)* | BHARAG2 YouTube workspace auth |
 | `BHARAG_YOUTUBE_LEDGER_SCHEMA` | `ingest.youtube` | BHARAG2 YouTube Ledger corpus |
